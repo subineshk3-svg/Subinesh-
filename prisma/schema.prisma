@@ -1,0 +1,175 @@
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id                String              @id @default(uuid())
+  name              String
+  email             String              @unique
+  phone             String?
+  passwordHash      String
+  emailVerified     Boolean             @default(false)
+  phoneVerified     Boolean             @default(false)
+  twoFactorEnabled  Boolean             @default(false)
+  role              String              @default("USER") // USER or ADMIN
+  credits           Int                 @default(50) // Free tier bonus
+  avatarUrl         String?
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+
+  otpVerifications  OtpVerification[]
+  sessions          Session[]
+  projects          Project[]
+  generations       Generation[]
+  creditHistory     CreditTransaction[]
+  subscriptions     Subscription[]
+  payments          Payment[]
+}
+
+model OtpVerification {
+  id          String    @id @default(uuid())
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  destination String    // Email or Phone number
+  otpHash     String
+  expiresAt   DateTime
+  attempts    Int       @default(0)
+  verifiedAt  DateTime?
+  createdAt   DateTime  @default(now())
+}
+
+model Session {
+  id        String    @id @default(uuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  device    String?
+  token     String    @unique
+  expiresAt DateTime
+  createdAt DateTime  @default(now())
+}
+
+model Project {
+  id                String       @id @default(uuid())
+  userId            String
+  user              User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name              String
+  originalImageUrl  String?
+  generatedVideoUrl String?
+  thumbnailUrl      String?
+  status            String       @default("QUEUED") // QUEUED, LOADING_MODEL, GENERATING, PROCESSING, UPLOADING, COMPLETED, FAILED, CANCELLED
+  stage             String       @default("QUEUED")
+  prompt            String?
+  negativePrompt    String?
+  model             String       @default("ltx-video")
+  duration          Int          @default(5)
+  aspectRatio       String       @default("16:9")
+  resolution        String       @default("1080p")
+  width             Int          @default(832)
+  height            Int          @default(480)
+  fps               Int          @default(16)
+  steps             Int          @default(30)
+  guidanceScale     Float        @default(6.0)
+  seed              Int          @default(-1)
+  isEnhancedPrompt  Boolean      @default(false)
+  creditsUsed       Int          @default(10)
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+
+  generations       Generation[]
+}
+
+model Generation {
+  id              String    @id @default(uuid())
+  projectId       String
+  project         Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  userId          String
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  provider        String    // e.g. "ltx-video", "wan2.1", "hunyuan", "cogvideo", "mochi"
+  model           String    // e.g. "LTX-Video", "Wan 2.1", "HunyuanVideo"
+  prompt          String
+  negativePrompt  String?
+  duration        Int       @default(5)
+  resolution      String    @default("1080p")
+  aspectRatio     String    @default("16:9")
+  width           Int       @default(832)
+  height          Int       @default(480)
+  fps             Int       @default(16)
+  steps           Int       @default(30)
+  guidanceScale   Float     @default(6.0)
+  seed            Int       @default(-1)
+  isEnhancedPrompt Boolean  @default(false)
+  status          String    @default("QUEUED") // QUEUED, LOADING_MODEL, GENERATING, PROCESSING, UPLOADING, COMPLETED, FAILED, CANCELLED
+  stage           String    @default("QUEUED")
+  progress        Int       @default(0)
+  providerJobId   String?
+  creditsReserved Int       @default(10)
+  creditsConsumed Int       @default(0)
+  errorMessage    String?
+  createdAt       DateTime  @default(now())
+  completedAt     DateTime?
+}
+
+model CreditTransaction {
+  id          String   @id @default(uuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  amount      Int      // Positive for purchases, negative for usage
+  type        String   // "GENERATION", "REFUND", "TOPUP", "BONUS", "SUBSCRIPTION"
+  referenceId String?
+  description String
+  createdAt   DateTime @default(now())
+}
+
+model Subscription {
+  id                     String    @id @default(uuid())
+  userId                 String
+  user                   User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  plan                   String    // "Free", "Creator", "Pro", "Business"
+  provider               String    // "stripe" or "razorpay"
+  providerSubscriptionId String?
+  status                 String    @default("ACTIVE") // ACTIVE, CANCELLED, EXPIRED
+  startDate              DateTime  @default(now())
+  endDate                DateTime?
+}
+
+model Payment {
+  id                String   @id @default(uuid())
+  userId            String
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  provider          String   // "stripe" or "razorpay"
+  providerPaymentId String
+  amount            Float
+  currency          String   @default("USD")
+  status            String   // "SUCCESS", "PENDING", "FAILED"
+  createdAt         DateTime @default(now())
+}
+
+model AiProviderConfig {
+  id             String         @id @default(uuid())
+  providerKey    String         @unique // e.g. "luma", "runway", "pika", "vj17"
+  name           String
+  status         String         @default("ONLINE") // ONLINE, DEGRADED, OFFLINE
+  apiKeyConfigured Boolean      @default(false)
+  isEnabled      Boolean        @default(true)
+  costMultiplier Float          @default(1.0)
+  priority       Int            @default(1)
+  models         AiModelConfig[]
+}
+
+model AiModelConfig {
+  id                   String           @id @default(uuid())
+  modelKey             String           @unique
+  name                 String
+  providerKey          String
+  provider             AiProviderConfig @relation(fields: [providerKey], references: [providerKey], onDelete: Cascade)
+  tier                 String           @default("BALANCED") // FAST, BALANCED, QUALITY
+  baseCreditCost       Int              @default(10)
+  maxDuration          Int              @default(15)
+  supportedResolutions String           @default("720p,1080p,4K")
+  isEnabled            Boolean          @default(true)
+}
